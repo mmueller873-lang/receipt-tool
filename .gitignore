@@ -1,0 +1,11 @@
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+*.xlsx
+*.csv
+*.jpg
+*.png
+*.jpeg
+receipt.jpg
+output.csv
