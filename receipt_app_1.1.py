@@ -80,7 +80,7 @@ with col_header_right:
     placeholder_dl = st.empty()
 
 # Retrieve API Key from Streamlit Cloud Secrets
-api_key = os.enrion.get["OPENAI_API_KEY"]
+api_key = os.environ.get["OPENAI_API_KEY"]
 
 # ============================================================
 # SESSION STATE
