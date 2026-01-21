@@ -7,6 +7,7 @@ from openai import OpenAI, RateLimitError, APITimeoutError
 from datetime import datetime
 import io
 import re
+import os
 
 # ============================================================
 # CONFIGURATION & COMMERCIAL STYLING
@@ -79,7 +80,7 @@ with col_header_right:
     placeholder_dl = st.empty()
 
 # Retrieve API Key from Streamlit Cloud Secrets
-api_key = st.secrets["OPENAI_API_KEY"]
+api_key = os.enrion.get["OPENAI_API_KEY"]
 
 # ============================================================
 # SESSION STATE
