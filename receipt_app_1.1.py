@@ -70,7 +70,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # HERO HEADER
-st.markdown('<h1 class="hero-title">🧾 Receipt Tool</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="hero-title">🧾 Receipt Tool v2</h1>', unsafe_allow_html=True)
 st.markdown('<p class="hero-caption">Professional Audit & Categorization</p>', unsafe_allow_html=True)
 
 # Header Row with Download Button at Top Right
@@ -80,7 +80,7 @@ with col_header_right:
     placeholder_dl = st.empty()
 
 # Retrieve API Key from Streamlit Cloud Secrets
-api_key = os.environ.get["OPENAI_API_KEY"]
+api_key = st.secrets["OPENAI_API_KEY"]
 
 # ============================================================
 # SESSION STATE
