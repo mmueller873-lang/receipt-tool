@@ -213,7 +213,7 @@ if uploaded_files:
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             future_to_file = {
-                executor.submit(process_single_file, file, MY_API_KEY): file 
+                executor.submit(process_single_file, file, api_key): file 
                 for file in uploaded_files
             }
             
