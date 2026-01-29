@@ -3,3 +3,6 @@ pandas
 openai
 xlsxwriter
 pillow
+pillow-heif
+PyPDF2
+beautifulsoup4
