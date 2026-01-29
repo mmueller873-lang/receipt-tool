@@ -4,4 +4,5 @@ openai
 xlsxwriter
 pillow
 pillow-heif
-fitz
+PyPDF2
+beautifulsoup4
