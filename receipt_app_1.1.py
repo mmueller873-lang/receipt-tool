@@ -7,33 +7,40 @@ from openai import OpenAI, RateLimitError, APITimeoutError
 from datetime import datetime
 import io
 import re
+import os
+
+# NEW IMPORTS
+from PIL import Image
+import PyPDF2
+from bs4 import BeautifulSoup
+
+# Try to register HEIF support
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+    HEIF_SUPPORTED = True
+except ImportError:
+    HEIF_SUPPORTED = False
 
 # ============================================================
-# CONFIGURATION & COMMERCIAL STYLING (Updated)
+# CONFIGURATION & COMMERCIAL STYLING
 # ============================================================
 st.set_page_config(page_title="Receipt Tool", layout="wide")
 
 st.markdown("""
 <style>
-    /* General Layout */
     .stApp { background-color: #f8f9fa; }
-    
-    /* HERO TITLE */
     .hero-title {
-        font-size: 2.5rem; /* Slightly smaller for mobile */
+        font-size: 2.5rem;
         font-weight: 800;
         color: #2c3e50;
         margin-bottom: 0px;
     }
-    
-    /* CAPTION */
     .hero-caption {
         font-size: 1.2rem;
         color: #7f8c8d;
         margin-bottom: 20px;
     }
-
-    /* SECTION HEADERS */
     .section-header {
         font-size: 1.5rem;
         font-weight: 700;
@@ -43,55 +50,37 @@ st.markdown("""
         margin-bottom: 15px;
         margin-top: 20px;
     }
+    [data-testid="stVegaLiteChart"] { pointer-events: none !important; }
     
-    /* CHART ZOOM FIX (Disable Pointer Events on Charts) */
-    [data-testid="stArrowVegaLiteChart"] {
-        pointer-events: none !important;
-    }
-    [data-testid="stVegaLiteChart"] {
-        pointer-events: none !important;
-    }
-    
-    /* MOBILE OPTIMIZATION */
     @media (max-width: 768px) {
         .hero-title { font-size: 2rem !important; }
         div.stButton > button { height: 2.5em !important; font-size: 1rem !important; }
         div[data-testid="stDownloadButton"] > button { height: 3em !important; }
     }
     
-    /* Action Buttons */
     div.stButton > button:first-child {
         background-color: #0066cc; color: white; font-weight: 600; border: none; border-radius: 6px; height: 3em; width: 100%; transition: 0.2s;
     }
     div.stButton > button:hover { background-color: #0056b3; transform: translateY(-1px); }
     
-    /* Download Button */
     div[data-testid="stDownloadButton"] > button:first-child {
         background-color: #28a745; color: white; font-weight: 700; border: none; border-radius: 6px; height: 3.5em; width: 100%; font-size: 1.1em;
     }
-    
-    /* Secondary Action (Add More) */
     div.stButton > button:nth-child(2) {
         background-color: #f39c12; color: white; font-weight: 600; border: none; border-radius: 6px; height: 3em; width: 100%;
     }
-
-    /* Data Frame */
-    [data-testid="stDataFrame"] {
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
+    [data-testid="stDataFrame"] { border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
 </style>
 """, unsafe_allow_html=True)
 
-# HERO HEADER
 st.markdown('<h1 class="hero-title">🧾 Receipt Tool</h1>', unsafe_allow_html=True)
 st.markdown('<p class="hero-caption">Professional Audit & Categorization</p>', unsafe_allow_html=True)
 
-# Header Row with Download Button at Top Right
 col_header_left, col_header_right = st.columns([3, 1])
 with col_header_right:
-    # Placeholders for the download button to be injected here
     placeholder_dl = st.empty()
+
+api_key = st.secrets.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
 
 # ============================================================
 # SESSION STATE
@@ -105,16 +94,59 @@ if 'uploader_key' not in st.session_state:
 if 'show_uploader' not in st.session_state:
     st.session_state.show_uploader = True
 
-# RETRIEVE API KEY (Hybrid Logic)
-api_key = st.secrets.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+# ============================================================
+# PRE-PROCESSING LOGIC (NEW)
+# ============================================================
 
-SYSTEM_PROMPT = """
-Extract from image: Date (YYYY-MM-DD), Vendor, Total (number), Category, Description.
-JSON: {"date": "...", "vendor": "...", "total": 0.00, "category": "...", "description": "..."}
-"""
+def preprocess_file(file):
+    """
+    Handles HEIC, PDF, HTML. 
+    Returns: {'type': 'image'|'text', 'data': bytes, 'name': str}
+    """
+    file_bytes = file.read()
+    filename = file.name.lower()
+    
+    # 1. HEIC to JPG
+    if filename.endswith('.heic'):
+        if not HEIF_SUPPORTED:
+            return None, "HEIC not supported on this server"
+        try:
+            image = Image.open(io.BytesIO(file_bytes))
+            rgb_im = image.convert('RGB')
+            output = io.BytesIO()
+            rgb_im.save(output, format="JPEG")
+            return {'type': 'image', 'data': output.getvalue(), 'name': file.name}
+        except Exception as e:
+            return None, f"HEIC Conversion Error: {str(e)}"
+
+    # 2. PDF Text Extraction
+    elif filename.endswith('.pdf'):
+        try:
+            pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text() + "\n"
+            if not text.strip():
+                return None, "PDF is a scan (Image-based) - not supported yet."
+            return {'type': 'text', 'data': text, 'name': file.name}
+        except Exception as e:
+            return None, f"PDF Error: {str(e)}"
+
+    # 3. HTML Text Extraction
+    elif filename.endswith('.html'):
+        try:
+            soup = BeautifulSoup(file_bytes, 'html.parser')
+            text = soup.get_text(separator="\n")
+            return {'type': 'text', 'data': text, 'name': file.name}
+        except Exception as e:
+            return None, f"HTML Error: {str(e)}"
+
+    # 4. Standard Image (JPG/PNG)
+    else:
+        return {'type': 'image', 'data': file_bytes, 'name': file.name}
 
 # ============================================================
-# LOGIC
+# AI LOGIC
 # ============================================================
 
 def extract_json_safely(content):
@@ -136,21 +168,53 @@ def extract_json_safely(content):
             pass
     return None
 
-def process_single_file(file, key):
+def process_single_file(file, key, extract_items_flag):
     try:
-        image_bytes = file.read()
-        base64_image = base64.b64encode(image_bytes).decode('utf-8')
+        # A. PRE-PROCESS
+        preproc = preprocess_file(file)
+        if not preproc:
+            return None, preproc[1] # Return error
+        
+        # B. DYNAMIC PROMPT
+        if extract_items_flag:
+            prompt = """
+            Analyze the receipt/data. Extract:
+            - Date (YYYY-MM-DD)
+            - Vendor
+            - Total (number)
+            - Category
+            - Items (List of objects with 'name', 'qty', 'price')
+            JSON: {"date": "...", "vendor": "...", "total": 0.00, "category": "...", "items": [{"name": "...", "qty": 1, "price": 0.00}]}
+            """
+        else:
+            prompt = """
+            Extract from image: Date (YYYY-MM-DD), Vendor, Total (number), Category, Description.
+            JSON: {"date": "...", "vendor": "...", "total": 0.00, "category": "...", "description": "..."}
+            """
+
+        # C. API CALL
         client = OpenAI(api_key=key)
         
         def make_request():
+            messages = []
+            
+            # If Text-based (PDF/HTML)
+            if preproc['type'] == 'text':
+                messages.append({"role": "user", "content": f"Data:\n{preproc['data'][:10000]}\n\n{prompt}"})
+            
+            # If Image-based (JPG/HEIC)
+            elif preproc['type'] == 'image':
+                base64_image = base64.b64encode(preproc['data']).decode('utf-8')
+                messages.append({
+                    "role": "user", "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "low"}}
+                    ]
+                })
+            
             return client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[
-                    {"role": "user", "content": [
-                        {"type": "text", "text": SYSTEM_PROMPT},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "low"}}
-                    ]}
-                ]
+                messages=messages
             )
 
         try:
@@ -164,6 +228,7 @@ def process_single_file(file, key):
         data = extract_json_safely(content)
         
         if data:
+            data['filename'] = file.name
             return data, None
         else:
             return None, "AI returned invalid text"
@@ -198,16 +263,20 @@ if st.session_state.master_results_df is not None and not st.session_state.show_
             st.rerun()
 
 # ============================================================
-# UPLOADER
+# UPLOADER & SETTINGS
 # ============================================================
 
 uploaded_files = None
 
 if st.session_state.show_uploader:
     with st.container():
+        # Deep Mode Toggle
+        extract_items = st.checkbox("🔍 Extract Line Items (Deep Mode)", value=False, help="Extract individual items (Qty/Price) to a separate Excel sheet.")
+        
+        # Updated types list
         uploaded_files = st.file_uploader(
-            "Drag & Drop receipt images here", 
-            type=['jpg', 'jpeg', 'png'],
+            "Drag & Drop receipts (JPG, PNG, HEIC, PDF, HTML)", 
+            type=['jpg', 'jpeg', 'png', 'heic', 'pdf', 'html'],
             accept_multiple_files=True,
             key=f"uploader_{st.session_state.uploader_key}"
         )
@@ -227,7 +296,7 @@ if uploaded_files:
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             future_to_file = {
-                executor.submit(process_single_file, file, api_key): file 
+                executor.submit(process_single_file, file, MY_API_KEY, extract_items): file 
                 for file in uploaded_files
             }
             
@@ -237,7 +306,6 @@ if uploaded_files:
                 try:
                     data, error = future.result()
                     if data:
-                        data['filename'] = file.name
                         results.append(data)
                     if error:
                         errors.append({"file": file.name, "error": error})
@@ -268,32 +336,51 @@ if uploaded_files:
 if st.session_state.master_results_df is not None:
     df = st.session_state.master_results_df
     
-    # Data Cleaning
+    # Normalize Data
     df['total'] = pd.to_numeric(df['total'], errors='coerce')
     df['date'] = pd.to_datetime(df['date'], errors='coerce')
     df['display_date'] = df['date'].dt.strftime('%Y-%m-%d')
     df = df.sort_values(by=['date', 'total'], ascending=[False, False])
 
-    # 1. DOWNLOAD BUTTON (Injected at Top Right)
+    # 1. DOWNLOAD BUTTON
     output = io.BytesIO()
     
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        # Sheet 1: Summary
         excel_cols = ['filename', 'date', 'vendor', 'total', 'category', 'description']
-        df.to_excel(writer, index=False, columns=excel_cols, sheet_name='Receipts')
+        # If no items extracted, we might just have description, or items list in json
+        df.to_excel(writer, index=False, columns=excel_cols, sheet_name='Summary')
+        
+        # Sheet 2: Line Items (IF EXISTS)
+        if 'items' in df.columns:
+            items_list = []
+            for index, row in df.iterrows():
+                if isinstance(row['items'], list):
+                    for item in row['items']:
+                        items_list.append({
+                            'Parent_File': row['filename'],
+                            'Item_Name': item.get('name'),
+                            'Qty': item.get('qty'),
+                            'Price': item.get('price')
+                        })
+            
+            if items_list:
+                items_df = pd.DataFrame(items_list)
+                items_df.to_excel(writer, index=False, sheet_name='Line Items')
         
         workbook = writer.book
-        worksheet = writer.sheets['Receipts']
-        
+        # Summary Sheet Formatting
+        worksheet = writer.sheets['Summary']
         currency_fmt = workbook.add_format({'num_format': '$#,##0.00', 'font_name': 'Arial'})
         date_fmt = workbook.add_format({'num_format': 'yyyy-mm-dd', 'font_name': 'Arial'})
         header_fmt = workbook.add_format({'bold': True, 'bg_color': '#2E86C1', 'font_color': 'white', 'font_name': 'Arial'})
         
-        worksheet.set_column('A:A', 35)
-        worksheet.set_column('B:B', 15)
-        worksheet.set_column('C:C', 30)
-        worksheet.set_column('D:D', 12)
-        worksheet.set_column('E:E', 15)
-        worksheet.set_column('F:F', 50)
+        worksheet.set_column('A:A', 35) # Filename
+        worksheet.set_column('B:B', 15) # Date
+        worksheet.set_column('C:C', 30) # Vendor
+        worksheet.set_column('D:D', 12) # Total
+        worksheet.set_column('E:E', 15) # Category
+        worksheet.set_column('F:F', 50) # Description
         
         for col_num, value in enumerate(excel_cols):
             worksheet.write(0, col_num, value.capitalize(), header_fmt)
@@ -301,7 +388,6 @@ if st.session_state.master_results_df is not None:
         for row_num in range(1, len(df) + 1):
             for col_idx, col_name in enumerate(excel_cols):
                 cell_data = df.iloc[row_num-1][col_name]
-                
                 if col_name == 'total' and pd.notna(cell_data):
                     worksheet.write(row_num, col_idx, cell_data, currency_fmt)
                 elif col_name == 'date':
@@ -340,13 +426,11 @@ if st.session_state.master_results_df is not None:
         avg_trans = df['total'].mean()
         st.metric("Avg. Transaction", f"${avg_trans:,.2f}")
 
-    # 3. CHARTS ROW (With Pointer-Events None)
+    # 3. CHARTS ROW
     c1, c2 = st.columns(2)
     with c1:
         st.markdown('<h3 class="section-header">💵 Spending by Category</h3>', unsafe_allow_html=True)
-        # use_container_width=False reduces some zoom effects
         st.bar_chart(df.groupby('category')['total'].sum(), use_container_width=False)
-        
     with c2:
         st.markdown('<h3 class="section-header">🧾 Count by Category</h3>', unsafe_allow_html=True)
         st.bar_chart(df['category'].value_counts(), use_container_width=False)
@@ -354,6 +438,11 @@ if st.session_state.master_results_df is not None:
     # 4. DATA TABLE
     st.markdown("<br>", unsafe_allow_html=True)
     st.success("Extraction Complete.")
+    
+    # Show Description if Deep Mode
+    if 'items' in df.columns:
+        st.caption("Note: Line Items exported to 'Line Items' sheet in Excel.")
+    
     st.dataframe(df[['display_date', 'vendor', 'total', 'category', 'description']], 
                  use_container_width=True, 
                  hide_index=True)
