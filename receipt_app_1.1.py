@@ -249,7 +249,7 @@ def process_single_file(file, key, extract_items_flag):
                     "role": "user", "content": [
                         {"type": "text", "text": prompt},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "high"}
-                    ]
+                    }
                 })
             
             return client.chat.completions.create(
