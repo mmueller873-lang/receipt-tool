@@ -97,17 +97,19 @@ if 'show_uploader' not in st.session_state:
     st.session_state.show_uploader = True
 
 # ============================================================
-# PRE-PROCESSING LOGIC (ROBUST HYBRID - Fixed Variable Scope)
+# PRE-PROCESSING LOGIC (BACKWARD COMPATIBLE PDF)
 # ============================================================
 
 def preprocess_file(file):
     """
     Handles HEIC, PDF, HTML. 
     PDF Strategy:
-    1. Try to extract text.
+    1. Try to extract text (Cheaper).
     2. Check for keywords ($, Total, Date).
-    3. If keywords found -> Return TEXT (Cheap).
-    4. If NO keywords -> Render Page 1 to Image (Robust).
+    3. If keywords found -> Return Text (Cheap).
+    4. If NO keywords -> Try to get Image (Robust).
+       - Uses 'render_to_pixmap' (New PyPDF2) for Scans.
+       - Uses 'page.images' (Old PyPDF2) for Embedded Photos.
     """
     file_bytes = file.read()
     filename = file.name.lower()
@@ -125,13 +127,12 @@ def preprocess_file(file):
         except Exception as e:
             return None, f"HEIC Conversion Error: {str(e)}"
 
-    # 2. PDF HYBRID HANDLING
+    # 2. PDF HANDLING
     elif filename.endswith('.pdf'):
         try:
             pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
             
             # --- Step A: Extract Text ---
-            # We use a separate variable `extracted_text` so it doesn't mix with image logic
             extracted_text = ""
             for page in pdf_reader.pages:
                 extracted_text += page.extract_text() + "\n"
@@ -141,28 +142,46 @@ def preprocess_file(file):
             has_keywords = any(word.lower() in extracted_text.lower() for word in keywords)
             
             # --- Step C: Decision ---
-            # If text has money words and is decent length, use TEXT (Cheap Path)
+            # Case 1: It's digital text with money words. Send TEXT (Cheap).
             if has_keywords and len(extracted_text) > 20:
                 return {'type': 'text', 'data': extracted_text, 'name': file.name}
             
-            # Else (Scan or Blank): RENDER IMAGE (Robust Path)
-            # We ensure we create a NEW BytesIO so it's strictly image data
-            page = pdf_reader.pages[0]
-            pixmap = page.render_to_pixmap()
-            
-            # Convert PPM raw data to Pillow Image
-            pil_image = Image.frombytes(pixmap.tobytes("ppm"))
-            rgb_im = pil_image.convert('RGB')
-            
-            # Create a dedicated image_bytes buffer
-            image_bytes = io.BytesIO()
-            rgb_im.save(image_bytes, format="JPEG")
-            
-            # Return strictly 'image' type with bytes
-            return {'type': 'image', 'data': image_bytes.getvalue(), 'name': file.name}
+            # Case 2: Scan or Blank. Try IMAGE.
+            else:
+                page = pdf_reader.pages[0]
+                image_bytes = None
+                
+                # Path 1: Universal Rendering (New PyPDF2) - Handles Scans & Photos
+                if hasattr(page, 'render_to_pixmap'):
+                    pixmap = page.render_to_pixmap()
+                    pil_image = Image.frombytes(pixmap.tobytes("ppm"))
+                    rgb_im = pil_image.convert('RGB')
+                    output = io.BytesIO()
+                    rgb_im.save(output, format="JPEG")
+                    image_bytes = output.getvalue()
+                    
+                # Path 2: Embedded Images (Old PyPDF2) - Handles "Photos saved as PDFs" ONLY
+                elif page.images:
+                    # Old versions expose images as objects.
+                    # We take the first image object.
+                    # Note: accessing data might differ slightly in very old versions, but .image_data is standard for PyPDF2 2.x/3.x
+                    img_obj = page.images[0]
+                    # We convert the raw bytes to a Pillow Image
+                    pil_image = Image.open(io.BytesIO(img_obj.image_data))
+                    rgb_im = pil_image.convert('RGB')
+                    output = io.BytesIO()
+                    rgb_im.save(output, format="JPEG")
+                    image_bytes = output.getvalue()
+                
+                # Path 3: Ultimate Failure (Old PyPDF2 + Scanned PDF)
+                else:
+                    return None, "PDF cannot be rendered (Server library is too old for this file). Please upload as JPG."
+                
+                # Success
+                return {'type': 'image', 'data': image_bytes, 'name': file.name}
                 
         except Exception as e:
-            return None, f"PDF Error: {str(e)} (Rendering failed)"
+            return None, f"PDF Error: {str(e)}"
 
     # 3. HTML (Fallback to text)
     elif filename.endswith('.html'):
