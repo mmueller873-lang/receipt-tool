@@ -8,8 +8,6 @@ from datetime import datetime
 import io
 import re
 import os
-
-# NEW IMPORTS
 from PIL import Image
 import PyPDF2
 from bs4 import BeautifulSoup
@@ -23,61 +21,140 @@ except ImportError:
     HEIF_SUPPORTED = False
 
 # ============================================================
-# CONFIGURATION & COMMERCIAL STYLING
+# CONFIGURATION & "PRO" STYLING
 # ============================================================
 st.set_page_config(page_title="Receipt Tool", layout="wide")
 
 st.markdown("""
 <style>
-    .stApp { background-color: #f8f9fa; }
+    /* IMPORT GOOGLE FONTS (Poppins) */
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
+
+    /* GLOBAL OVERRIDES */
+    .stApp {
+        background-color: #f3f6fa; /* Subtle cool grey-blue */
+        font-family: 'Poppins', sans-serif !important;
+    }
+    
+    /* HERO SECTION */
     .hero-title {
-        font-size: 2.5rem;
-        font-weight: 800;
-        color: #2c3e50;
+        font-size: 3.5rem;
+        font-weight: 700;
+        color: #1a365d; /* Deep Navy */
+        letter-spacing: -0.02em;
         margin-bottom: 0px;
     }
+    
     .hero-caption {
-        font-size: 1.2rem;
-        color: #7f8c8d;
-        margin-bottom: 20px;
+        font-size: 1.3rem;
+        color: #5e647a;
+        margin-bottom: 40px;
+        font-weight: 400;
     }
+
+    /* CARD SYSTEM (The "Sexy" Wrapper) */
+    .card {
+        background-color: white;
+        border-radius: 20px;
+        padding: 2.5rem 2rem;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+        border: 1px solid rgba(0, 0, 0, 0.05);
+        margin-bottom: 2rem;
+        transition: transform 0.2s;
+    }
+    
+    .card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 14px 30px -5px rgba(0, 0, 0, 0.1), 0 10px 15px -6px rgba(0, 0, 0, 0.1);
+    }
+
+    /* SECTION HEADERS */
     .section-header {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: #34495e;
-        border-left: 5px solid #0066cc;
-        padding-left: 10px;
+        font-size: 1.3rem;
+        font-weight: 600;
+        color: #334e68;
+        border-left: 4px solid #0066cc;
+        padding-left: 12px;
         margin-bottom: 15px;
-        margin-top: 20px;
+        margin-top: 10px;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
     }
-       [data-testid="stVegaLiteChart"] { 
+
+    /* CHART STYLING */
+    [data-testid="stVegaLiteChart"] { 
         pointer-events: none !important; 
-        height: 400px !important; /* Makes charts taller and more legible */
-    }    
+        height: 350px !important;
+    }
+    
+    /* BUTTONS (Premium Feel) */
+    div.stButton > button:first-child {
+        background-color: #0066cc; 
+        color: white; 
+        font-weight: 600; 
+        border: none; 
+        border-radius: 50px; /* Pill shape */
+        height: 3.5em; 
+        width: 100%; 
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    
+    div.stButton > button:hover { 
+        background-color: #0052a3; 
+        transform: translateY(-1px); 
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+    }
+    
+    /* DOWNLOAD BUTTON (Highlight) */
+    div[data-testid="stDownloadButton"] > button:first-child {
+        background-color: #28a745; 
+        color: white; 
+        font-weight: 700; 
+        border: none; 
+        border-radius: 50px;
+        height: 3.5em; 
+        width: 100%; 
+        font-size: 1.05em;
+        box-shadow: 0 4px 6px rgba(40, 167, 69, 0.2);
+    }
+
+    /* SECONDARY ACTION (Add More) */
+    div.stButton > button:nth-child(2) {
+        background-color: #6c757d; 
+        color: white; 
+        font-weight: 600; 
+        border: none; 
+        border-radius: 50px;
+        height: 3.5em; 
+        width: 100%;
+    }
+    div.stButton > button:nth-child(2):hover {
+        background-color: #5a6363;
+    }
+
+    /* DATAFRAME STYLING */
+    [data-testid="stDataFrame"] { 
+        border-radius: 10px; 
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); 
+        font-family: 'Poppins', sans-serif;
+    }
+
+    /* MOBILE OPTIMIZATION */
     @media (max-width: 768px) {
-        .hero-title { font-size: 2rem !important; }
-        div.stButton > button { height: 2.5em !important; font-size: 1rem !important; }
+        .hero-title { font-size: 2.2rem !important; }
+        .card { padding: 1.5rem 1rem !important; }
+        div.stButton > button { height: 3em !important; font-size: 1rem !important; }
         div[data-testid="stDownloadButton"] > button { height: 3em !important; }
     }
-    
-    div.stButton > button:first-child {
-        background-color: #0066cc; color: white; font-weight: 600; border: none; border-radius: 6px; height: 3em; width: 100%; transition: 0.2s;
-    }
-    div.stButton > button:hover { background-color: #0056b3; transform: translateY(-1px); }
-    
-    div[data-testid="stDownloadButton"] > button:first-child {
-        background-color: #28a745; color: white; font-weight: 700; border: none; border-radius: 6px; height: 3.5em; width: 100%; font-size: 1.1em;
-    }
-    div.stButton > button:nth-child(2) {
-        background-color: #f39c12; color: white; font-weight: 600; border: none; border-radius: 6px; height: 3em; width: 100%;
-    }
-    [data-testid="stDataFrame"] { border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
 </style>
 """, unsafe_allow_html=True)
 
+# HERO HEADER
 st.markdown('<h1 class="hero-title">🧾 Receipt Tool</h1>', unsafe_allow_html=True)
 st.markdown('<p class="hero-caption">Professional Audit & Categorization</p>', unsafe_allow_html=True)
 
+# Header Row with Download Button at Top Right
 col_header_left, col_header_right = st.columns([3, 1])
 with col_header_right:
     placeholder_dl = st.empty()
@@ -97,7 +174,7 @@ if 'show_uploader' not in st.session_state:
     st.session_state.show_uploader = True
 
 # ============================================================
-# PRE-PROCESSING LOGIC (TEXT ONLY - ROBUST & SIMPLE)
+# PRE-PROCESSING LOGIC (HYBRID TEXT/IMAGE)
 # ============================================================
 
 def preprocess_file(file):
@@ -143,7 +220,7 @@ def preprocess_file(file):
         except Exception as e:
             return None, f"PDF Error: {str(e)}"
 
-    # 3. HTML (Fallback)
+    # 3. HTML (Fallback to text)
     elif filename.endswith('.html'):
         try:
             soup = BeautifulSoup(file_bytes, 'html.parser')
@@ -180,7 +257,7 @@ def extract_json_safely(content):
     return None
 
 # ============================================================
-# AI LOGIC (MATCHES NEW PRE-PROCESSING LOGIC)
+# AI LOGIC (MATCHES NEW PRE-PROCESSING)
 # ============================================================
 
 def process_single_file(file, key, extract_items_flag):
@@ -189,9 +266,7 @@ def process_single_file(file, key, extract_items_flag):
         preproc = preprocess_file(file)
         
         # --- BACKWARD COMPATIBILITY & ERROR CHECK ---
-        # If preproc is a Tuple (old error format), handle it
         if isinstance(preproc, tuple) or not preproc:
-            # If it's a tuple, index 1 is the error message.
             error_msg = preproc[1] if isinstance(preproc, tuple) else "Unknown Error"
             return None, error_msg
         
@@ -223,7 +298,7 @@ def process_single_file(file, key, extract_items_flag):
                 # We slice [:10000] to keep prompt short
                 messages.append({"role": "user", "content": f"Data:\n{preproc['data'][:10000]}\n\n{prompt}"})
             
-            # If Image-based (JPG/HEIC/PDF-Rendered) -> preproc['data'] is Bytes
+            # If Image-based (JPG/HEIC) -> preproc['data'] is Bytes
             elif preproc['type'] == 'image':
                 base64_image = base64.b64encode(preproc['data']).decode('utf-8')
                 messages.append({
@@ -290,17 +365,20 @@ if st.session_state.master_results_df is not None and not st.session_state.show_
 uploaded_files = None
 
 if st.session_state.show_uploader:
-    with st.container():
-        # Deep Mode Toggle
-        extract_items = st.checkbox("🔍 Extract Line Items (Deep Mode)", value=False, help="Extract individual items (Qty/Price) to a separate Excel sheet.")
-        
-        # Updated types list
-        uploaded_files = st.file_uploader(
-            "Drag & Drop receipts (JPG, PNG, HEIC, PDF, HTML)", 
-            type=['jpg', 'jpeg', 'png', 'heic', 'pdf', 'html'],
-            accept_multiple_files=True,
-            key=f"uploader_{st.session_state.uploader_key}"
-        )
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    
+    # Deep Mode Toggle
+    extract_items = st.checkbox("🔍 Extract Line Items (Deep Mode)", value=False, help="Extract individual items (Qty/Price) to a separate Excel sheet.")
+    
+    # Updated types list
+    uploaded_files = st.file_uploader(
+        "Drag & Drop receipts (JPG, PNG, HEIC, PDF, HTML)", 
+        type=['jpg', 'jpeg', 'png', 'heic', 'pdf', 'html'],
+        accept_multiple_files=True,
+        key=f"uploader_{st.session_state.uploader_key}"
+    )
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ============================================================
 # PROCESSING LOGIC
@@ -367,7 +445,6 @@ if st.session_state.master_results_df is not None:
     output = io.BytesIO()
     
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        
         # --- SUMMARY SHEET ---
         desired_summary_cols = ['filename', 'date', 'vendor', 'total', 'category', 'description']
         summary_cols_to_export = [c for c in desired_summary_cols if c in df.columns]
@@ -376,10 +453,10 @@ if st.session_state.master_results_df is not None:
         # --- LINE ITEMS SHEET (IF EXISTS) ---
         if 'items' in df.columns:
             items_list = []
+            # Note: Changed from iterrows() to iterrows()
             for index, row in df.iterrows():
                 if isinstance(row['items'], list):
                     for item in row['items']:
-                        # Linked to Date and Vendor
                         items_list.append({
                             'Date': row['date'],
                             'Vendor': row['vendor'],
@@ -397,13 +474,13 @@ if st.session_state.master_results_df is not None:
         # --- FORMAT BOTH SHEETS ---
         workbook = writer.book
         
-        # Formats
-        currency_fmt = workbook.add_format({'num_format': '$#,##0.00', 'font_name': 'Arial'})
-        date_fmt = workbook.add_format({'num_format': 'yyyy-mm-dd', 'font_name': 'Arial'})
-        header_fmt = workbook.add_format({'bold': True, 'bg_color': '#2E86C1', 'font_color': 'white', 'font_name': 'Arial'})
-        zebra_blue = workbook.add_format({'bg_color': '#EBF5FB', 'font_name': 'Arial'})
-        zebra_white = workbook.add_format({'bg_color': 'white', 'font_name': 'Arial'})
-        cell_center = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'font_name': 'Arial'})
+        # Define Shared Formats
+        currency_fmt = workbook.add_format({'num_format': '$#,##0.00', 'font_name': 'Poppins'})
+        date_fmt = workbook.add_format({'num_format': 'yyyy-mm-dd', 'font_name': 'Poppins'})
+        header_fmt = workbook.add_format({'bold': True, 'bg_color': '#2E86C1', 'font_color': 'white', 'font_name': 'Poppins'})
+        zebra_blue = workbook.add_format({'bg_color': '#EBF5FB', 'font_name': 'Poppins'})
+        zebra_white = workbook.add_format({'bg_color': 'white', 'font_name': 'Poppins'})
+        cell_center = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'font_name': 'Poppins'})
         
         # --- FORMAT SUMMARY SHEET ---
         worksheet_summary = writer.sheets['Summary']
@@ -414,28 +491,27 @@ if st.session_state.master_results_df is not None:
         worksheet_summary.set_column('E:E', 15)
         worksheet_summary.set_column('F:F', 50)
         
-        # Headers
-        for col_num, col_name in enumerate(summary_cols_to_export):
-            worksheet_summary.write(0, col_num, col_name.capitalize(), header_fmt)
+        # Write Headers based on DYNAMIC list
+        for col_num, value in enumerate(summary_cols_to_export):
+            worksheet_summary.write(0, col_num, value.capitalize(), header_fmt)
         
-        # Data (Explicit Dictionary Mapping for safety)
         for row_num in range(1, len(df) + 1):
-            is_blue_row = (row_num % 2 == 0)
-            cell_fmt = zebra_blue if is_blue_row else zebra_white
-            
             for col_idx, col_name in enumerate(summary_cols_to_export):
-                val = df.iloc[row_num-1][col_name]
+                cell_data = df.iloc[row_num-1][col_name]
                 
-                # Format based on Type
-                if col_name == 'total' and pd.notna(val):
-                    worksheet_summary.write_number(row_num, col_idx, val, currency_fmt)
-                elif col_name == 'date' and pd.notna(val):
-                    worksheet_summary.write_datetime(row_num, col_idx, val, date_fmt)
+                if col_name == 'total' and pd.notna(cell_data):
+                    worksheet_summary.write_number(row_num, col_idx, cell_data, currency_fmt)
+                elif col_name == 'date' and pd.notna(cell_data):
+                    worksheet_summary.write_datetime(row_num, col_idx, df.iloc[row_num-1]['date'], date_fmt)
                 elif col_name == 'filename':
-                    worksheet_summary.write(row_num, col_idx, str(val), zebra_white) # Filename always white? Or zebra. Let's keep zebra.
+                    worksheet_summary.write(row_num, col_idx, str(cell_data), zebra_white)
                 else:
-                    worksheet_summary.write(row_num, col_idx, str(val), cell_fmt)
-
+                    if row_num % 2 == 0:
+                        cell_fmt = zebra_blue
+                    else:
+                        cell_fmt = zebra_white
+                    worksheet_summary.write(row_num, col_idx, str(cell_data), cell_fmt)
+        
         worksheet_summary.autofilter(0, 0, len(df), len(summary_cols_to_export) - 1)
         worksheet_summary.freeze_panes(1, 0)
 
@@ -447,13 +523,13 @@ if st.session_state.master_results_df is not None:
             # Widths
             worksheet_items.set_column('A:A', 15) # Date
             worksheet_items.set_column('B:B', 30) # Vendor
-            worksheet_items.set_column('C:C', 40) # Item
+            worksheet_items.set_column('C:C', 40) # Item Name
             worksheet_items.set_column('D:D', 10) # Qty
             worksheet_items.set_column('E:E', 15) # Price
             
             # Headers
-            for col_num, col_name in enumerate(items_cols):
-                worksheet_items.write(0, col_num, col_name.replace('_', ' '), header_fmt)
+            for col_num, value in enumerate(items_cols):
+                worksheet_items.write(0, col_num, value.replace('_', ' '), header_fmt)
             
             # Data
             for row_num in range(1, len(items_list) + 1):
@@ -466,7 +542,7 @@ if st.session_state.master_results_df is not None:
                     val = data_dict.get(col_name, "")
                     
                     if col_name == 'Price' and pd.notna(val):
-                        worksheet_items.write_number(row_num, col_idx, val, currency_fmt)
+                        worksheet_items.write(row_num, col_idx, val, currency_fmt)
                     elif col_name == 'Date' and pd.notna(val):
                         worksheet_items.write_datetime(row_num, col_idx, val, date_fmt)
                     elif col_name in ['Qty']:
@@ -488,6 +564,9 @@ if st.session_state.master_results_df is not None:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
+    # WRAP MAIN CONTENT IN A CARD
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    
     # 2. METRICS ROW
     st.markdown("<br>", unsafe_allow_html=True)
     m1, m2, m3 = st.columns(3)
@@ -499,7 +578,7 @@ if st.session_state.master_results_df is not None:
         avg_trans = df['total'].mean()
         st.metric("Avg. Transaction", f"${avg_trans:,.2f}")
 
-    # 3. CHARTS ROW (TALLER)
+    # 3. CHARTS ROW
     c1, c2 = st.columns(2)
     with c1:
         st.markdown('<h3 class="section-header">💵 Spending by Category</h3>', unsafe_allow_html=True)
@@ -519,7 +598,10 @@ if st.session_state.master_results_df is not None:
                  use_container_width=True, 
                  hide_index=True)
 
-    # 5. ERROR LOG
+    # CLOSE CARD BEFORE ERRORS
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # 5. ERROR LOG (Outside Card, or separate Card? Let's keep it outside to avoid clutter inside main card, or put in separate card. I'll leave it outside for simplicity.)
     if st.session_state.processing_errors:
         with st.expander(f"⚠️ View Errors ({len(st.session_state.processing_errors)})"):
             unique_errors = [dict(t) for t in {tuple(sorted(d.items())) for d in st.session_state.processing_errors}]
