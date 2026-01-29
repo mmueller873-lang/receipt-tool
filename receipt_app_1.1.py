@@ -97,19 +97,13 @@ if 'show_uploader' not in st.session_state:
     st.session_state.show_uploader = True
 
 # ============================================================
-# PRE-PROCESSING LOGIC (BACKWARD COMPATIBLE PDF)
+# PRE-PROCESSING LOGIC (TEXT ONLY - ROBUST & SIMPLE)
 # ============================================================
 
 def preprocess_file(file):
     """
     Handles HEIC, PDF, HTML. 
-    PDF Strategy:
-    1. Try to extract text (Cheaper).
-    2. Check for keywords ($, Total, Date).
-    3. If keywords found -> Return Text (Cheap).
-    4. If NO keywords -> Try to get Image (Robust).
-       - Uses 'render_to_pixmap' (New PyPDF2) for Scans.
-       - Uses 'page.images' (Old PyPDF2) for Embedded Photos.
+    PDF Strategy: Text Only. If no text/keywords, return error.
     """
     file_bytes = file.read()
     filename = file.name.lower()
@@ -127,63 +121,29 @@ def preprocess_file(file):
         except Exception as e:
             return None, f"HEIC Conversion Error: {str(e)}"
 
-    # 2. PDF HANDLING
+    # 2. PDF Text Extraction (No Image Handling)
     elif filename.endswith('.pdf'):
         try:
             pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
-            
-            # --- Step A: Extract Text ---
-            extracted_text = ""
+            text = ""
             for page in pdf_reader.pages:
-                extracted_text += page.extract_text() + "\n"
+                text += page.extract_text() + "\n"
             
-            # --- Step B: Heuristic Check (Is it a digital receipt?) ---
+            # Heuristic: Is it a receipt?
             keywords = ['$', 'total', 'date', 'amount', 'eur', 'usd', 'gbp', 'invoice']
-            has_keywords = any(word.lower() in extracted_text.lower() for word in keywords)
+            has_keywords = any(word.lower() in text.lower() for word in keywords)
             
-            # --- Step C: Decision ---
-            # Case 1: It's digital text with money words. Send TEXT (Cheap).
-            if has_keywords and len(extracted_text) > 20:
-                return {'type': 'text', 'data': extracted_text, 'name': file.name}
-            
-            # Case 2: Scan or Blank. Try IMAGE.
+            # Only return text if it looks like a receipt (has money words) and is decent length
+            if has_keywords and len(text) > 20:
+                return {'type': 'text', 'data': text, 'name': file.name}
             else:
-                page = pdf_reader.pages[0]
-                image_bytes = None
-                
-                # Path 1: Universal Rendering (New PyPDF2) - Handles Scans & Photos
-                if hasattr(page, 'render_to_pixmap'):
-                    pixmap = page.render_to_pixmap()
-                    pil_image = Image.frombytes(pixmap.tobytes("ppm"))
-                    rgb_im = pil_image.convert('RGB')
-                    output = io.BytesIO()
-                    rgb_im.save(output, format="JPEG")
-                    image_bytes = output.getvalue()
-                    
-                # Path 2: Embedded Images (Old PyPDF2) - Handles "Photos saved as PDFs" ONLY
-                elif page.images:
-                    # Old versions expose images as objects.
-                    # We take the first image object.
-                    # Note: accessing data might differ slightly in very old versions, but .image_data is standard for PyPDF2 2.x/3.x
-                    img_obj = page.images[0]
-                    # We convert the raw bytes to a Pillow Image
-                    pil_image = Image.open(io.BytesIO(img_obj.image_data))
-                    rgb_im = pil_image.convert('RGB')
-                    output = io.BytesIO()
-                    rgb_im.save(output, format="JPEG")
-                    image_bytes = output.getvalue()
-                
-                # Path 3: Ultimate Failure (Old PyPDF2 + Scanned PDF)
-                else:
-                    return None, "PDF cannot be rendered (Server library is too old for this file). Please upload as JPG."
-                
-                # Success
-                return {'type': 'image', 'data': image_bytes, 'name': file.name}
+                # If no keywords, or text is empty/short -> Likely a scan or unsupported format.
+                return None, "PDF appears to be a scan or has no extractable text. Please upload as JPG."
                 
         except Exception as e:
             return None, f"PDF Error: {str(e)}"
 
-    # 3. HTML (Fallback to text)
+    # 3. HTML (Fallback)
     elif filename.endswith('.html'):
         try:
             soup = BeautifulSoup(file_bytes, 'html.parser')
