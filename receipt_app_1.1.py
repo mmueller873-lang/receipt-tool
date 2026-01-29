@@ -97,17 +97,17 @@ if 'show_uploader' not in st.session_state:
     st.session_state.show_uploader = True
 
 # ============================================================
-# PRE-PROCESSING LOGIC (HYBRID TEXT/IMAGE)
+# PRE-PROCESSING LOGIC (ROBUST HYBRID - Fixed Variable Scope)
 # ============================================================
 
 def preprocess_file(file):
     """
     Handles HEIC, PDF, HTML. 
-    PDF Strategy: 
-    1. Try to extract text (Cheaper).
+    PDF Strategy:
+    1. Try to extract text.
     2. Check for keywords ($, Total, Date).
-    3. If keywords found -> Return Text (Cheap Path).
-    4. If NO keywords -> Render to Image (Robust Path for scans).
+    3. If keywords found -> Return TEXT (Cheap).
+    4. If NO keywords -> Render Page 1 to Image (Robust).
     """
     file_bytes = file.read()
     filename = file.name.lower()
@@ -130,36 +130,39 @@ def preprocess_file(file):
         try:
             pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
             
-            # Step A: Extract Text
-            text = ""
+            # --- Step A: Extract Text ---
+            # We use a separate variable `extracted_text` so it doesn't mix with image logic
+            extracted_text = ""
             for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
+                extracted_text += page.extract_text() + "\n"
             
-            # Step B: Heuristic Check (Is it a digital receipt?)
-            # We look for common receipt keywords
+            # --- Step B: Heuristic Check (Is it a digital receipt?) ---
             keywords = ['$', 'total', 'date', 'amount', 'eur', 'usd', 'gbp', 'invoice']
-            has_keywords = any(word.lower() in text.lower() for word in keywords)
+            has_keywords = any(word.lower() in extracted_text.lower() for word in keywords)
             
-            # Step C: Decision
-            if has_keywords and len(text) > 20:
-                # It looks like a digital invoice. Send TEXT (Cheap).
-                return {'type': 'text', 'data': text, 'name': file.name}
-            else:
-                # It looks like a scan or blank. RENDER IMAGE (Robust).
-                # We render the first page to an image using PyPDF2
-                page = pdf_reader.pages[0]
-                pixmap = page.render_to_pixmap()
-                
-                # Convert raw PPM image data to Pillow Image
-                pil_image = Image.frombytes(pixmap.tobytes("ppm"))
-                rgb_im = pil_image.convert('RGB')
-                output = io.BytesIO()
-                rgb_im.save(output, format="JPEG")
-                
-                return {'type': 'image', 'data': output.getvalue(), 'name': file.name}
+            # --- Step C: Decision ---
+            # If text has money words and is decent length, use TEXT (Cheap Path)
+            if has_keywords and len(extracted_text) > 20:
+                return {'type': 'text', 'data': extracted_text, 'name': file.name}
+            
+            # Else (Scan or Blank): RENDER IMAGE (Robust Path)
+            # We ensure we create a NEW BytesIO so it's strictly image data
+            page = pdf_reader.pages[0]
+            pixmap = page.render_to_pixmap()
+            
+            # Convert PPM raw data to Pillow Image
+            pil_image = Image.frombytes(pixmap.tobytes("ppm"))
+            rgb_im = pil_image.convert('RGB')
+            
+            # Create a dedicated image_bytes buffer
+            image_bytes = io.BytesIO()
+            rgb_im.save(image_bytes, format="JPEG")
+            
+            # Return strictly 'image' type with bytes
+            return {'type': 'image', 'data': image_bytes.getvalue(), 'name': file.name}
                 
         except Exception as e:
-            return None, f"PDF Error: {str(e)} (Could not render or extract)"
+            return None, f"PDF Error: {str(e)} (Rendering failed)"
 
     # 3. HTML (Fallback to text)
     elif filename.endswith('.html'):
