@@ -97,13 +97,14 @@ if 'show_uploader' not in st.session_state:
     st.session_state.show_uploader = True
 
 # ============================================================
-# PRE-PROCESSING LOGIC (NEW)
+# PRE-PROCESSING LOGIC (ROBUST PDF -> IMAGE)
 # ============================================================
 
 def preprocess_file(file):
     """
-    Handles HEIC, PDF, HTML. 
-    Returns: {'type': 'image'|'text', 'data': bytes, 'name': str}
+    Robust handler: 
+    1. Images (JPG/PNG/HEIC) -> Pass through
+    2. PDF -> Render Page 1 to Image -> Pass through
     """
     file_bytes = file.read()
     filename = file.name.lower()
@@ -121,20 +122,29 @@ def preprocess_file(file):
         except Exception as e:
             return None, f"HEIC Conversion Error: {str(e)}"
 
-    # 2. PDF Text Extraction
+    # 2. PDF to Image (THE ROBUST FIX)
     elif filename.endswith('.pdf'):
         try:
-            pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
-            text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
-            if not text.strip():
-                return None, "PDF is a scan (Image-based) - not supported yet."
-            return {'type': 'text', 'data': text, 'name': file.name}
+            # fitz renders PDF to Image
+            import fitz
+            pages = fitz.read(io.BytesIO(file_bytes))
+            
+            # We only process the FIRST page
+            # pixmap.tobytes() gives us the raw image data
+            image_bytes = pages[0].pixmap.tobytes("ppm")
+            
+            # Convert PPM raw bytes to Pillow Image
+            image = Image.open(io.BytesIO(image_bytes))
+            rgb_im = image.convert('RGB')
+            output = io.BytesIO()
+            rgb_im.save(output, format="JPEG")
+            
+            return {'type': 'image', 'data': output.getvalue(), 'name': file.name}
+            
         except Exception as e:
-            return None, f"PDF Error: {str(e)}"
+            return None, f"PDF Rendering Error: {str(e)} (Try uploading as JPG)"
 
-    # 3. HTML Text Extraction
+    # 3. HTML (Kept for your use case, though rare)
     elif filename.endswith('.html'):
         try:
             soup = BeautifulSoup(file_bytes, 'html.parser')
@@ -148,7 +158,7 @@ def preprocess_file(file):
         return {'type': 'image', 'data': file_bytes, 'name': file.name}
 
 # ============================================================
-# AI LOGIC
+# AI LOGIC (UNIFIED VISION)
 # ============================================================
 
 def extract_json_safely(content):
@@ -172,20 +182,15 @@ def extract_json_safely(content):
 
 def process_single_file(file, key, extract_items_flag):
     try:
-        # A. PRE-PROCESS
+        # A. PRE-PROCESS (Returns Image bytes 99% of time now)
         preproc = preprocess_file(file)
+        if not preproc:
+            return None, preproc[1] # Return error
         
-        # A.1 CHECK TYPE: Success returns Dict, Failure returns Tuple
-        # We must distinguish between them.
-        if isinstance(preproc, tuple) or not preproc:
-            # If it's a tuple, index 1 is the error message.
-            error_msg = preproc[1] if isinstance(preproc, tuple) else "Unknown Error"
-            return None, error_msg
-        
-        # B. DYNAMIC PROMPT
+        # B. DYNAMIC PROMPT (We only need Image prompt now!)
         if extract_items_flag:
             prompt = """
-            Analyze receipt/data. Extract:
+            Analyze this receipt image. Extract:
             - Date (YYYY-MM-DD)
             - Vendor
             - Total (number)
@@ -199,29 +204,21 @@ def process_single_file(file, key, extract_items_flag):
             JSON: {"date": "...", "vendor": "...", "total": 0.00, "category": "...", "description": "..."}
             """
 
-        # C. API CALL
+        # C. API CALL (Unified Image Path)
         client = OpenAI(api_key=key)
         
         def make_request():
-            messages = []
-            
-            # If Text-based (PDF/HTML)
-            if preproc['type'] == 'text':
-                messages.append({"role": "user", "content": f"Data:\n{preproc['data'][:10000]}\n\n{prompt}"})
-            
-            # If Image-based (JPG/HEIC)
-            elif preproc['type'] == 'image':
-                base64_image = base64.b64encode(preproc['data']).decode('utf-8')
-                messages.append({
-                    "role": "user", "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "low"}}
-                    ]
-                })
+            # We don't check if text/image anymore. We ONLY send image.
+            base64_image = base64.b64encode(preproc['data']).decode('utf-8')
             
             return client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=messages
+                messages=[
+                    {"role": "user", "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "high"}}
+                    ]}
+                ]
             )
 
         try:
