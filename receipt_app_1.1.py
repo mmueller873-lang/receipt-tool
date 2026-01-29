@@ -178,7 +178,7 @@ def preprocess_file(file):
         return {'type': 'image', 'data': file_bytes, 'name': file.name}
 
 # ============================================================
-# AI LOGIC (MATCHES NEW PRE-PROCESSING LOGIC)
+# EXTRACT JSON SAFELY
 # ============================================================
 
 def extract_json_safely(content):
@@ -200,6 +200,10 @@ def extract_json_safely(content):
             pass
     return None
 
+# ============================================================
+# AI LOGIC (MATCHES NEW PRE-PROCESSING LOGIC)
+# ============================================================
+
 def process_single_file(file, key, extract_items_flag):
     try:
         # A. PRE-PROCESS
@@ -207,12 +211,10 @@ def process_single_file(file, key, extract_items_flag):
         
         # --- BACKWARD COMPATIBILITY & ERROR CHECK ---
         # If preproc is a Tuple (old error format), handle it
-        if isinstance(preproc, tuple):
-            return None, preproc[1]
-        
-        # If preproc is None, handle it
-        if not preproc:
-            return None, "Unknown Preprocessing Error"
+        if isinstance(preproc, tuple) or not preproc:
+            # If it's a tuple, index 1 is the error message.
+            error_msg = preproc[1] if isinstance(preproc, tuple) else "Unknown Error"
+            return None, error_msg
         
         # B. DYNAMIC PROMPT
         if extract_items_flag:
@@ -248,8 +250,8 @@ def process_single_file(file, key, extract_items_flag):
                 messages.append({
                     "role": "user", "content": [
                         {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "high"}
-                    }
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "high"}}
+                    ]
                 })
             
             return client.chat.completions.create(
