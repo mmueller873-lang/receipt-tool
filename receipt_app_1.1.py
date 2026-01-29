@@ -7,10 +7,9 @@ from openai import OpenAI, RateLimitError, APITimeoutError
 from datetime import datetime
 import io
 import re
-import os
 
 # ============================================================
-# CONFIGURATION & COMMERCIAL STYLING
+# CONFIGURATION & COMMERCIAL STYLING (Updated)
 # ============================================================
 st.set_page_config(page_title="Receipt Tool", layout="wide")
 
@@ -21,7 +20,7 @@ st.markdown("""
     
     /* HERO TITLE */
     .hero-title {
-        font-size: 3rem;
+        font-size: 2.5rem; /* Slightly smaller for mobile */
         font-weight: 800;
         color: #2c3e50;
         margin-bottom: 0px;
@@ -34,7 +33,7 @@ st.markdown("""
         margin-bottom: 20px;
     }
 
-    /* SECTION HEADERS (For Charts) */
+    /* SECTION HEADERS */
     .section-header {
         font-size: 1.5rem;
         font-weight: 700;
@@ -43,6 +42,21 @@ st.markdown("""
         padding-left: 10px;
         margin-bottom: 15px;
         margin-top: 20px;
+    }
+    
+    /* CHART ZOOM FIX (Disable Pointer Events on Charts) */
+    [data-testid="stArrowVegaLiteChart"] {
+        pointer-events: none !important;
+    }
+    [data-testid="stVegaLiteChart"] {
+        pointer-events: none !important;
+    }
+    
+    /* MOBILE OPTIMIZATION */
+    @media (max-width: 768px) {
+        .hero-title { font-size: 2rem !important; }
+        div.stButton > button { height: 2.5em !important; font-size: 1rem !important; }
+        div[data-testid="stDownloadButton"] > button { height: 3em !important; }
     }
     
     /* Action Buttons */
@@ -76,11 +90,8 @@ st.markdown('<p class="hero-caption">Professional Audit & Categorization</p>', u
 # Header Row with Download Button at Top Right
 col_header_left, col_header_right = st.columns([3, 1])
 with col_header_right:
-    # Placeholder for download button to be injected here
+    # Placeholders for the download button to be injected here
     placeholder_dl = st.empty()
-
-# Retrieve API Key from Streamlit Cloud Secrets
-api_key = st.secrets["OPENAI_API_KEY"]
 
 # ============================================================
 # SESSION STATE
@@ -93,6 +104,9 @@ if 'uploader_key' not in st.session_state:
     st.session_state.uploader_key = 0
 if 'show_uploader' not in st.session_state:
     st.session_state.show_uploader = True
+
+# RETRIEVE API KEY (Hybrid Logic)
+api_key = st.secrets.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
 
 SYSTEM_PROMPT = """
 Extract from image: Date (YYYY-MM-DD), Vendor, Total (number), Category, Description.
@@ -274,12 +288,12 @@ if st.session_state.master_results_df is not None:
         date_fmt = workbook.add_format({'num_format': 'yyyy-mm-dd', 'font_name': 'Arial'})
         header_fmt = workbook.add_format({'bold': True, 'bg_color': '#2E86C1', 'font_color': 'white', 'font_name': 'Arial'})
         
-        worksheet.set_column('A:A', 35) # Filename
-        worksheet.set_column('B:B', 15) # Date
-        worksheet.set_column('C:C', 30) # Vendor
-        worksheet.set_column('D:D', 12) # Total
-        worksheet.set_column('E:E', 15) # Category
-        worksheet.set_column('F:F', 50) # Description
+        worksheet.set_column('A:A', 35)
+        worksheet.set_column('B:B', 15)
+        worksheet.set_column('C:C', 30)
+        worksheet.set_column('D:D', 12)
+        worksheet.set_column('E:E', 15)
+        worksheet.set_column('F:F', 50)
         
         for col_num, value in enumerate(excel_cols):
             worksheet.write(0, col_num, value.capitalize(), header_fmt)
@@ -326,16 +340,16 @@ if st.session_state.master_results_df is not None:
         avg_trans = df['total'].mean()
         st.metric("Avg. Transaction", f"${avg_trans:,.2f}")
 
-    # 3. CHARTS ROW (With Eye-Catching Titles)
+    # 3. CHARTS ROW (With Pointer-Events None)
     c1, c2 = st.columns(2)
-    
     with c1:
         st.markdown('<h3 class="section-header">💵 Spending by Category</h3>', unsafe_allow_html=True)
-        st.bar_chart(df.groupby('category')['total'].sum())
+        # use_container_width=False reduces some zoom effects
+        st.bar_chart(df.groupby('category')['total'].sum(), use_container_width=False)
         
     with c2:
         st.markdown('<h3 class="section-header">🧾 Count by Category</h3>', unsafe_allow_html=True)
-        st.bar_chart(df['category'].value_counts())
+        st.bar_chart(df['category'].value_counts(), use_container_width=False)
 
     # 4. DATA TABLE
     st.markdown("<br>", unsafe_allow_html=True)
