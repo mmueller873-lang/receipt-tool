@@ -178,7 +178,7 @@ def preprocess_file(file):
         return {'type': 'image', 'data': file_bytes, 'name': file.name}
 
 # ============================================================
-# AI LOGIC (UNIFIED VISION)
+# AI LOGIC (MATCHES NEW PRE-PROCESSING LOGIC)
 # ============================================================
 
 def extract_json_safely(content):
@@ -202,15 +202,22 @@ def extract_json_safely(content):
 
 def process_single_file(file, key, extract_items_flag):
     try:
-        # A. PRE-PROCESS (Returns Image bytes 99% of time now)
+        # A. PRE-PROCESS
         preproc = preprocess_file(file)
-        if not preproc:
-            return None, preproc[1] # Return error
         
-        # B. DYNAMIC PROMPT (We only need Image prompt now!)
+        # --- BACKWARD COMPATIBILITY & ERROR CHECK ---
+        # If preproc is a Tuple (old error format), handle it
+        if isinstance(preproc, tuple):
+            return None, preproc[1]
+        
+        # If preproc is None, handle it
+        if not preproc:
+            return None, "Unknown Preprocessing Error"
+        
+        # B. DYNAMIC PROMPT
         if extract_items_flag:
             prompt = """
-            Analyze this receipt image. Extract:
+            Analyze receipt/data. Extract:
             - Date (YYYY-MM-DD)
             - Vendor
             - Total (number)
@@ -224,21 +231,30 @@ def process_single_file(file, key, extract_items_flag):
             JSON: {"date": "...", "vendor": "...", "total": 0.00, "category": "...", "description": "..."}
             """
 
-        # C. API CALL (Unified Image Path)
+        # C. API CALL (Matches Dict Format)
         client = OpenAI(api_key=key)
         
         def make_request():
-            # We don't check if text/image anymore. We ONLY send image.
-            base64_image = base64.b64encode(preproc['data']).decode('utf-8')
+            messages = []
+            
+            # If Text-based (PDF/HTML) -> preproc['data'] is a String
+            if preproc['type'] == 'text':
+                # We slice [:10000] to keep prompt short
+                messages.append({"role": "user", "content": f"Data:\n{preproc['data'][:10000]}\n\n{prompt}"})
+            
+            # If Image-based (JPG/HEIC/PDF-Rendered) -> preproc['data'] is Bytes
+            elif preproc['type'] == 'image':
+                base64_image = base64.b64encode(preproc['data']).decode('utf-8')
+                messages.append({
+                    "role": "user", "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "high"}
+                    ]
+                })
             
             return client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[
-                    {"role": "user", "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}", "detail": "high"}}
-                    ]}
-                ]
+                messages=messages
             )
 
         try:
