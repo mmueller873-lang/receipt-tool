@@ -296,7 +296,7 @@ if uploaded_files:
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             future_to_file = {
-                executor.submit(process_single_file, file, MY_API_KEY, extract_items): file 
+                executor.submit(process_single_file, file, api_key, extract_items): file 
                 for file in uploaded_files
             }
             
@@ -348,7 +348,6 @@ if st.session_state.master_results_df is not None:
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         # Sheet 1: Summary
         excel_cols = ['filename', 'date', 'vendor', 'total', 'category', 'description']
-        # If no items extracted, we might just have description, or items list in json
         df.to_excel(writer, index=False, columns=excel_cols, sheet_name='Summary')
         
         # Sheet 2: Line Items (IF EXISTS)
@@ -371,6 +370,7 @@ if st.session_state.master_results_df is not None:
         workbook = writer.book
         # Summary Sheet Formatting
         worksheet = writer.sheets['Summary']
+        
         currency_fmt = workbook.add_format({'num_format': '$#,##0.00', 'font_name': 'Arial'})
         date_fmt = workbook.add_format({'num_format': 'yyyy-mm-dd', 'font_name': 'Arial'})
         header_fmt = workbook.add_format({'bold': True, 'bg_color': '#2E86C1', 'font_color': 'white', 'font_name': 'Arial'})
@@ -439,7 +439,6 @@ if st.session_state.master_results_df is not None:
     st.markdown("<br>", unsafe_allow_html=True)
     st.success("Extraction Complete.")
     
-    # Show Description if Deep Mode
     if 'items' in df.columns:
         st.caption("Note: Line Items exported to 'Line Items' sheet in Excel.")
     
