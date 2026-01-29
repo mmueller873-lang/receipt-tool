@@ -50,8 +50,10 @@ st.markdown("""
         margin-bottom: 15px;
         margin-top: 20px;
     }
-    [data-testid="stVegaLiteChart"] { pointer-events: none !important; }
-    
+       [data-testid="stVegaLiteChart"] { 
+        pointer-events: none !important; 
+        height: 400px !important; /* Makes charts taller and more legible */
+    }    
     @media (max-width: 768px) {
         .hero-title { font-size: 2rem !important; }
         div.stButton > button { height: 2.5em !important; font-size: 1rem !important; }
@@ -346,22 +348,23 @@ if st.session_state.master_results_df is not None:
     output = io.BytesIO()
     
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # DYNAMIC COLUMN SELECTION: Only export columns that exist in dataframe
+        
+        # --- SUMMARY SHEET ---
         desired_summary_cols = ['filename', 'date', 'vendor', 'total', 'category', 'description']
         summary_cols_to_export = [c for c in desired_summary_cols if c in df.columns]
-        
-        # Sheet 1: Summary
         df.to_excel(writer, index=False, columns=summary_cols_to_export, sheet_name='Summary')
         
-        # Sheet 2: Line Items (IF EXISTS)
+        # --- LINE ITEMS SHEET (IF EXISTS) ---
         if 'items' in df.columns:
             items_list = []
-            # Note: Changed from iterrows() to iterrows()
+            # Note: Using iterrows() to access 'date' and 'vendor' from parent row
             for index, row in df.iterrows():
                 if isinstance(row['items'], list):
                     for item in row['items']:
+                        # LINK to Vendor and Date instead of filename
                         items_list.append({
-                            'Parent_File': row['filename'],
+                            'Date': row['date'],
+                            'Vendor': row['vendor'],
                             'Item_Name': item.get('name'),
                             'Qty': item.get('qty'),
                             'Price': item.get('price')
@@ -369,47 +372,146 @@ if st.session_state.master_results_df is not None:
             
             if items_list:
                 items_df = pd.DataFrame(items_list)
+                # Sort items by Date then Price
+                items_df = items_df.sort_values(by=['Date', 'Price'], ascending=[False, False])
                 items_df.to_excel(writer, index=False, sheet_name='Line Items')
         
+        # --- FORMATTING BOTH SHEETS ---
         workbook = writer.book
-        # Summary Sheet Formatting
-        worksheet = writer.sheets['Summary']
         
+        # Define Shared Formats
         currency_fmt = workbook.add_format({'num_format': '$#,##0.00', 'font_name': 'Arial'})
         date_fmt = workbook.add_format({'num_format': 'yyyy-mm-dd', 'font_name': 'Arial'})
         header_fmt = workbook.add_format({'bold': True, 'bg_color': '#2E86C1', 'font_color': 'white', 'font_name': 'Arial'})
+        cell_center = workbook.add_format({'align': 'center', 'valign': 'vcenter', 'font_name': 'Arial'})
         
-        worksheet.set_column('A:A', 35) # Filename
-        worksheet.set_column('B:B', 15) # Date
-        worksheet.set_column('C:C', 30) # Vendor
-        worksheet.set_column('D:D', 12) # Total
-        worksheet.set_column('E:E', 15) # Category
-        worksheet.set_column('F:F', 50) # Description
+        # --- FORMAT SUMMARY SHEET ---
+        worksheet_summary = writer.sheets['Summary']
+        worksheet_summary.set_column('A:A', 35)
+        worksheet_summary.set_column('B:B', 15)
+        worksheet_summary.set_column('C:C', 30)
+        worksheet_summary.set_column('D:D', 12)
+        worksheet_summary.set_column('E:E', 15)
+        worksheet_summary.set_column('F:F', 50)
         
-        # Write Headers based on DYNAMIC list
+        # Write Summary Headers & Zebra
         for col_num, value in enumerate(summary_cols_to_export):
-            worksheet.write(0, col_num, value.capitalize(), header_fmt)
-        
+            worksheet_summary.write(0, col_num, value.capitalize(), header_fmt)
+            
         for row_num in range(1, len(df) + 1):
             for col_idx, col_name in enumerate(summary_cols_to_export):
                 cell_data = df.iloc[row_num-1][col_name]
-                
                 if col_name == 'total' and pd.notna(cell_data):
-                    worksheet.write(row_num, col_idx, cell_data, currency_fmt)
+                    worksheet_summary.write(row_num, col_idx, cell_data, currency_fmt)
                 elif col_name == 'date':
                     if pd.notna(df.iloc[row_num-1]['date']):
-                        worksheet.write_datetime(row_num, col_idx, df.iloc[row_num-1]['date'], date_fmt)
+                        worksheet_summary.write_datetime(row_num, col_idx, df.iloc[row_num-1]['date'], date_fmt)
                     else:
-                        worksheet.write(row_num, col_idx, cell_data)
+                        worksheet_summary.write(row_num, col_idx, cell_data)
                 else:
                     if row_num % 2 == 0:
                         cell_fmt = workbook.add_format({'bg_color': '#EBF5FB', 'font_name': 'Arial'})
                     else:
                         cell_fmt = workbook.add_format({'bg_color': 'white', 'font_name': 'Arial'})
-                    worksheet.write(row_num, col_idx, str(cell_data), cell_fmt)
-        
-        worksheet.autofilter(0, 0, len(df), len(summary_cols_to_export) - 1)
-        worksheet.freeze_panes(1, 0)
+                    worksheet_summary.write(row_num, col_idx, str(cell_data), cell_fmt)
+
+        worksheet_summary.autofilter(0, 0, len(df), len(summary_cols_to_export) - 1)
+        worksheet_summary.freeze_panes(1, 0)
+
+        # --- FORMAT LINE ITEMS SHEET ---
+        if 'items' in df.columns and items_list:
+            worksheet_items = writer.sheets['Line Items']
+            # Define Items Columns: Date, Vendor, Item_Name, Qty, Price
+            items_cols = ['Date', 'Vendor', 'Item_Name', 'Qty', 'Price']
+            
+            # Widths
+            worksheet_items.set_column('A:A', 15) # Date
+            worksheet_items.set_column('B:B', 30) # Vendor
+            worksheet_items.set_column('C:C', 40) # Item Name
+            worksheet_items.set_column('D:D', 10) # Qty
+            worksheet_items.set_column('E:E', 15) # Price
+            
+            # Write Item Headers
+            for col_num, value in enumerate(items_cols):
+                worksheet_items.write(0, col_num, value.replace('_', ' '), header_fmt)
+            
+            # Write Item Data (Zebra + Currency)
+            for row_num in range(1, len(items_list) + 1):
+                row_data = items_list[row_num-1]
+                
+                # Date (Col 0)
+                if pd.notna(row_data['Date']):
+                    worksheet_items.write_datetime(row_num, 0, row_data['Date'], date_fmt)
+                else:
+                    worksheet_items.write(row_num, 0, "", cell_center)
+
+                # Vendor (Col 1)
+                worksheet_items.write(row_num, 1, str(row_data['Vendor']), cell_center)
+
+                # Item Name (Col 2)
+                worksheet_items.write(row_num, 2, str(row_data['Item_Name']), cell_center)
+
+                # Qty (Col 3)
+                qty_val = row_data['Qty'] if row_data['Qty'] else 1
+                worksheet_items.write(row_num, 3, qty_val, cell_center)
+
+                # Price (Col 4)
+                price_val = row_data['Price'] if row_data['Price'] else 0
+                worksheet_items.write(row_num, 4, price_val, currency_fmt)
+                
+                # Zebra Striping
+                if row_num % 2 == 0:
+                    cell_bg = workbook.add_format({'bg_color': '#EBF5FB', 'font_name': 'Arial'})
+                    worksheet_items.set_row(row_num, row_num, cell_bg) # Alternative way to color whole row if needed, or just loop cells
+
+            # Better Zebra for Items (Cell by cell approach)
+            for row_num in range(1, len(items_list) + 1):
+                for col_idx in range(len(items_cols)):
+                    if row_num % 2 == 0:
+                        bg_color = '#EBF5FB'
+                    else:
+                        bg_color = 'white'
+                    # Re-apply background (Note: This overwrites value, so we only set format, usually xlsxwriter is tricky with reformatting)
+                    # Simpler: Just set format for all cells
+                    pass 
+            # To make Zebra work properly with XlsxWriter without overwriting data, we usually define cell format before writing or use conditional formats.
+            # For this iteration, let's keep it simple (White text on white bg is bad).
+            # I'll revert to the loop approach used in Summary sheet for items, which worked well.
+            for row_num in range(1, len(items_list) + 1):
+                for col_idx in range(len(items_cols)):
+                     if row_num % 2 == 0:
+                        cell_fmt = workbook.add_format({'bg_color': '#EBF5FB', 'font_name': 'Arial'})
+                     else:
+                        cell_fmt = workbook.add_format({'bg_color': 'white', 'font_name': 'Arial'})
+                     # Re-write format only if we didn't write data? No, we wrote data above.
+                     # The "Summary" loop wrote data + format in one go. Let's do that for Items to ensure it sticks.
+            
+            # RE-WRITE ITEMS LOGIC TO INCLUDE FORMAT (Cleaner)
+            for row_num in range(1, len(items_list) + 1):
+                for col_idx in range(len(items_cols)):
+                    # Determine cell value
+                    val = items_list[row_num-1][col_idx]
+                    is_currency = (items_cols[col_idx] == 'Price')
+                    is_date = (items_cols[col_idx] == 'Date')
+                    
+                    # Determine format
+                    if row_num % 2 == 0:
+                        cell_fmt = workbook.add_format({'bg_color': '#EBF5FB', 'font_name': 'Arial'})
+                    else:
+                        cell_fmt = workbook.add_format({'bg_color': 'white', 'font_name': 'Arial'})
+                    
+                    # Apply formats
+                    if is_currency:
+                        cell_fmt.set_num_format('$#,##0.00')
+                    elif is_date and pd.notna(val):
+                        worksheet_items.write_datetime(row_num, col_idx, val, cell_fmt)
+                        continue
+                    
+                    # Write non-datetime
+                    worksheet_items.write(row_num, col_idx, val, cell_fmt)
+
+            worksheet_items.autofilter(0, 0, len(items_list), len(items_cols) - 1)
+            worksheet_items.freeze_panes(1, 0)
 
     output.seek(0)
     
@@ -432,23 +534,20 @@ if st.session_state.master_results_df is not None:
         avg_trans = df['total'].mean()
         st.metric("Avg. Transaction", f"${avg_trans:,.2f}")
 
-    # 3. CHARTS ROW
+    # 3. CHARTS ROW (TALLER & LEGIBLE)
     c1, c2 = st.columns(2)
     with c1:
         st.markdown('<h3 class="section-header">💵 Spending by Category</h3>', unsafe_allow_html=True)
-        st.bar_chart(df.groupby('category')['total'].sum(), use_container_width=False)
+        # use_container_width=True is better for legibility, combined with CSS height
+        st.bar_chart(df.groupby('category')['total'].sum(), use_container_width=True)
     with c2:
         st.markdown('<h3 class="section-header">🧾 Count by Category</h3>', unsafe_allow_html=True)
-        st.bar_chart(df['category'].value_counts(), use_container_width=False)
+        st.bar_chart(df['category'].value_counts(), use_container_width=True)
 
     # 4. DATA TABLE
     st.markdown("<br>", unsafe_allow_html=True)
     st.success("Extraction Complete.")
     
-    if 'items' in df.columns:
-        st.caption("Note: Line Items exported to 'Line Items' sheet in Excel.")
-    
-    # Display only columns that exist for view too
     display_cols = ['display_date', 'vendor', 'total', 'category', 'description']
     display_cols = [c for c in display_cols if c in df.columns]
     
