@@ -96,14 +96,17 @@ if 'show_uploader' not in st.session_state:
     st.session_state.show_uploader = True
 
 # ============================================================
-# PRE-PROCESSING LOGIC (ROBUST PDF -> IMAGE)
+# PRE-PROCESSING LOGIC (HYBRID TEXT/IMAGE)
 # ============================================================
 
 def preprocess_file(file):
     """
-    Robust handler: 
-    1. Images (JPG/PNG/HEIC) -> Pass through
-    2. PDF -> Render Page 1 to Image -> Pass through
+    Handles HEIC, PDF, HTML. 
+    PDF Strategy: 
+    1. Try to extract text (Cheaper).
+    2. Check for keywords ($, Total, Date).
+    3. If keywords found -> Return Text (Cheap Path).
+    4. If NO keywords -> Render to Image (Robust Path for scans).
     """
     file_bytes = file.read()
     filename = file.name.lower()
@@ -121,29 +124,43 @@ def preprocess_file(file):
         except Exception as e:
             return None, f"HEIC Conversion Error: {str(e)}"
 
-    # 2. PDF to Image (THE ROBUST FIX)
+    # 2. PDF HYBRID HANDLING
     elif filename.endswith('.pdf'):
         try:
-            # fitz renders PDF to Image
-            import fitz
-            pages = fitz.read(io.BytesIO(file_bytes))
+            pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
             
-            # We only process the FIRST page
-            # pixmap.tobytes() gives us the raw image data
-            image_bytes = pages[0].pixmap.tobytes("ppm")
+            # Step A: Extract Text
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text() + "\n"
             
-            # Convert PPM raw bytes to Pillow Image
-            image = Image.open(io.BytesIO(image_bytes))
-            rgb_im = image.convert('RGB')
-            output = io.BytesIO()
-            rgb_im.save(output, format="JPEG")
+            # Step B: Heuristic Check (Is it a digital receipt?)
+            # We look for common receipt keywords
+            keywords = ['$', 'total', 'date', 'amount', 'eur', 'usd', 'gbp', 'invoice']
+            has_keywords = any(word.lower() in text.lower() for word in keywords)
             
-            return {'type': 'image', 'data': output.getvalue(), 'name': file.name}
-            
+            # Step C: Decision
+            if has_keywords and len(text) > 20:
+                # It looks like a digital invoice. Send TEXT (Cheap).
+                return {'type': 'text', 'data': text, 'name': file.name}
+            else:
+                # It looks like a scan or blank. RENDER IMAGE (Robust).
+                # We render the first page to an image using PyPDF2
+                page = pdf_reader.pages[0]
+                pixmap = page.render_to_pixmap()
+                
+                # Convert raw PPM image data to Pillow Image
+                pil_image = Image.frombytes(pixmap.tobytes("ppm"))
+                rgb_im = pil_image.convert('RGB')
+                output = io.BytesIO()
+                rgb_im.save(output, format="JPEG")
+                
+                return {'type': 'image', 'data': output.getvalue(), 'name': file.name}
+                
         except Exception as e:
-            return None, f"PDF Rendering Error: {str(e)} (Try uploading as JPG)"
+            return None, f"PDF Error: {str(e)} (Could not render or extract)"
 
-    # 3. HTML (Kept for your use case, though rare)
+    # 3. HTML (Fallback to text)
     elif filename.endswith('.html'):
         try:
             soup = BeautifulSoup(file_bytes, 'html.parser')
