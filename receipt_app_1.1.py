@@ -11,7 +11,8 @@ import os
 
 # NEW IMPORTS
 from PIL import Image
-import fitz
+import PyPDF2
+from bs4 import BeautifulSoup
 
 # Try to register HEIF support
 try:
