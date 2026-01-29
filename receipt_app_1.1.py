@@ -174,13 +174,18 @@ def process_single_file(file, key, extract_items_flag):
     try:
         # A. PRE-PROCESS
         preproc = preprocess_file(file)
-        if not preproc:
-            return None, preproc[1] # Return error
+        
+        # A.1 CHECK TYPE: Success returns Dict, Failure returns Tuple
+        # We must distinguish between them.
+        if isinstance(preproc, tuple) or not preproc:
+            # If it's a tuple, index 1 is the error message.
+            error_msg = preproc[1] if isinstance(preproc, tuple) else "Unknown Error"
+            return None, error_msg
         
         # B. DYNAMIC PROMPT
         if extract_items_flag:
             prompt = """
-            Analyze the receipt/data. Extract:
+            Analyze receipt/data. Extract:
             - Date (YYYY-MM-DD)
             - Vendor
             - Total (number)
